@@ -304,7 +304,7 @@ The Timer struct uses atomic operations for reading and writing start and end ti
 Build the package:
 
 ```bash
-v .
+v -shared .
 ```
 
 Run tests (if available):
