@@ -1,4 +1,4 @@
-module main
+module vtimer
 
 import time { sleep }
 

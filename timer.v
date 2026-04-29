@@ -5,14 +5,9 @@ import time { sleep }
 import sync.stdatomic
 import math
 
-// Windows specific
-$if windows {
-	#flag windows -lKernel32
-	#include <windows.h>
-
-	fn C.QueryPerformanceCounter(lpPerformanceCount voidptr) C.BOOL
-	fn C.QueryPerformanceFrequency(lpFrequency voidptr) C.BOOL
-} $else {
+// Windows-specific QPC declarations live in timer_windows.c.v so V
+// suppresses the emitted extern (avoids redeclaration vs windows.h).
+$if !windows {
 	// Unix/Linux/MacOS specific
 	$if macos {
 		#include <mach/mach_time.h>
@@ -278,7 +273,7 @@ pub fn now_ns() i64 {
 pub fn format_time[T](ns T) string {
 	mut remaining := f64(ns)
 	mut secs := i64(remaining / billionth)
-	remaining = math.fmod(remaining, billionth)
+	remaining = math.fmod(remaining, f64(billionth))
 
 	mut mins := secs / 60
 	secs %= 60
