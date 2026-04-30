@@ -12,7 +12,8 @@ $if !windows {
 	$if macos {
 		#include <mach/mach_time.h>
 
-		struct C.mach_timebase_info_data_t {
+		pub struct C.mach_timebase_info_data_t {
+		pub mut:
 			numer u32
 			denom u32
 		}
@@ -22,7 +23,8 @@ $if !windows {
 	} $else {
 		#include <time.h>
 
-		struct C.timespec {
+		pub struct C.timespec {
+		pub mut:
 			tv_sec  i64
 			tv_nsec i64
 		}
