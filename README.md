@@ -15,6 +15,7 @@ vtimer provides atomic and precise timing functionality for V applications. It u
 - **Multiple Time Formats**: Convert to microseconds, milliseconds, seconds, minutes, hours, and days
 - **Human-Readable Output**: Built-in time formatting function
 - **Monotonic Clock**: Uses monotonic time sources to avoid issues with system clock adjustments
+- **Delay Timer**: Go `time.Timer`-style one-shot timer that fires on its own unbuffered channel, with `stop()`/`reset()` support
 
 ## Installation
 
@@ -103,6 +104,44 @@ fn main() {
     formatted := vtimer.format_time(timer.ns())
     println('Elapsed: ${formatted}')
     // Example output: "2 mins 30 secs" or "1.234 ms"
+}
+```
+
+### Delay Timer (channel-based, one-shot)
+
+```v
+import quaesitor_scientiam.vtimer
+
+fn main() {
+    // Fires once, ~500ms from now, delivering the fire timestamp on `c`
+    mut dt := vtimer.new_delay_timer(500_000_000) // duration in nanoseconds
+
+    fired_at := <-dt.c
+    println('Fired at: ${fired_at} ns')
+}
+```
+
+Cancel before it fires, or push the deadline back:
+
+```v
+import quaesitor_scientiam.vtimer
+import time
+
+fn main() {
+    mut dt := vtimer.new_delay_timer(time.second.nanoseconds())
+
+    // Change your mind and cancel it
+    if dt.stop() {
+        println('Cancelled before it fired')
+    }
+
+    // ...or restart it with a new duration instead
+    mut dt2 := vtimer.new_delay_timer(time.second.nanoseconds())
+    was_active := dt2.reset(5 * time.second.nanoseconds())
+    println('Was active before reset: ${was_active}')
+
+    fired_at := <-dt2.c
+    println('Fired at: ${fired_at} ns')
 }
 ```
 
@@ -214,6 +253,41 @@ formatted := vtimer.format_time(1234567)
 // Returns: "1.235 ms"
 ```
 
+### DelayTimer Struct
+
+```v
+pub struct DelayTimer {
+    mu  &sync.Mutex
+    gen u64
+pub mut:
+    c chan i64
+}
+```
+
+### DelayTimer Functions
+
+#### `new_delay_timer(duration_ns i64) &DelayTimer`
+Creates a `DelayTimer` and immediately starts it counting down from now. It fires exactly once, `duration_ns` nanoseconds later, by sending the fire timestamp on `c`. Durations are always plain `i64` nanoseconds — no `time.Duration` in the public API.
+
+```v
+mut dt := vtimer.new_delay_timer(100_000_000) // 100ms
+fired_at := <-dt.c
+```
+
+#### `(mut t DelayTimer) stop() bool`
+Cancels a pending fire. Returns `true` if it stopped the timer before it fired, `false` if the timer had already fired or was already stopped — matching Go's `Timer.Stop()` contract.
+
+```v
+stopped := dt.stop()
+```
+
+#### `(mut t DelayTimer) reset(duration_ns i64) bool`
+Stops any pending fire and restarts the countdown from now with a new duration. Returns whether the timer was active before this call — matching Go's `Timer.Reset()` contract.
+
+```v
+was_active := dt.reset(200_000_000) // 200ms from now
+```
+
 ## Examples
 
 ### Benchmarking Code
@@ -293,6 +367,8 @@ Uses `clock_gettime()` with `CLOCK_MONOTONIC` for monotonic time measurements.
 ## Thread Safety
 
 The Timer struct uses atomic operations for reading and writing start and end times, making it safe for concurrent access. Multiple threads can read elapsed time while the timer is running.
+
+DelayTimer uses a mutex-guarded generation counter to make `stop()` and `reset()` race-free: firing and cancelling both check-and-clear the same generation id under the lock, so exactly one of them can win for a given countdown, and a `reset()` can never cause a stale countdown to fire twice.
 
 ## Requirements
 
