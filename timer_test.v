@@ -221,6 +221,77 @@ fn test_frequency_initialization() {
 	assert timer1.freq > 0, 'Frequency should be positive'
 }
 
+// Test that a DelayTimer fires and delivers a value on c after approximately
+// the requested duration
+fn test_delay_timer_fires() {
+	before := now_ns()
+	mut dt := new_delay_timer(40_000_000) // 40ms
+
+	fired_at := <-dt.c
+
+	after := now_ns()
+	elapsed := after - before
+
+	assert fired_at >= before, 'Fire timestamp should be at or after timer creation'
+	assert fired_at <= after, 'Fire timestamp should be at or before receive completes'
+	assert elapsed >= 30_000_000, 'Should fire no earlier than ~30ms (${elapsed} ns)'
+	assert elapsed < 300_000_000, 'Should fire well before 300ms (${elapsed} ns)'
+}
+
+// Test that stop() before firing returns true and the channel never receives
+// a value
+fn test_delay_timer_stop_before_fire() {
+	mut dt := new_delay_timer(50_000_000) // 50ms
+
+	stopped := dt.stop()
+	assert stopped == true, 'stop() should return true when called before the timer fires'
+
+	// Wait past the original duration to make sure it really never fires
+	sleep(time.millisecond.times(80))
+
+	mut received := false
+	select {
+		_ := <-dt.c {
+			received = true
+		}
+		else {
+			received = false
+		}
+	}
+	assert received == false, 'Channel should never receive a value after stop()'
+}
+
+// Test that stop() after the timer already fired returns false
+fn test_delay_timer_stop_after_fire() {
+	mut dt := new_delay_timer(20_000_000) // 20ms
+
+	fired_at := <-dt.c
+	assert fired_at > 0, 'Fired timestamp should be a positive nanosecond count'
+
+	stopped := dt.stop()
+	assert stopped == false, 'stop() should return false once the timer already fired'
+}
+
+// Test that reset() restarts/extends the countdown from the moment it is
+// called, using the new duration rather than the original one
+fn test_delay_timer_reset() {
+	mut dt := new_delay_timer(20_000_000) // 20ms
+
+	// Reset shortly after starting, before the original 20ms elapses
+	sleep(time.millisecond.times(5))
+	reset_at := now_ns()
+	was_active := dt.reset(60_000_000) // 60ms from now
+	assert was_active == true, 'reset() should report the timer was active before the call'
+
+	fired_at := <-dt.c
+	elapsed := fired_at - reset_at
+
+	// Should take roughly the *new* 60ms duration from the reset call, not
+	// the ~15ms that would remain from the original 20ms schedule
+	assert elapsed >= 40_000_000, 'Should fire per the reset duration, not the original (${elapsed} ns)'
+	assert elapsed < 250_000_000, 'Should still fire in a reasonable time after reset (${elapsed} ns)'
+}
+
 // Benchmark test - measure overhead
 fn test_timer_overhead() {
 	mut timer := new_timer()

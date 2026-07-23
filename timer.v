@@ -2,6 +2,7 @@
 module vtimer
 
 import time { sleep }
+import sync
 import sync.stdatomic
 import math
 
@@ -268,6 +269,74 @@ pub fn now_ns() i64 {
 		C.clock_gettime(clock_monotonic, &ts)
 		return ts.tv_sec * billionth + ts.tv_nsec
 	}
+}
+
+// DelayTimer - fires exactly once in the background after a plain i64
+// nanosecond duration elapses, delivering the fire timestamp (now_ns()) on
+// `c`. Mirrors Go's time.Timer semantics (stop/reset contracts included)
+// without using time.Duration anywhere in the public API.
+pub struct DelayTimer {
+mut:
+	mu  &sync.Mutex
+	gen u64 // 0 = no pending fire (stopped or already fired); otherwise the id of the currently-scheduled countdown
+pub mut:
+	c chan i64
+}
+
+// new_delay_timer - Create a DelayTimer and immediately start it counting
+// down from now; it fires once after duration_ns nanoseconds
+pub fn new_delay_timer(duration_ns i64) &DelayTimer {
+	mut t := &DelayTimer{
+		mu:  sync.new_mutex()
+		gen: 1
+		c:   chan i64{cap: 0}
+	}
+	spawn t.run(u64(1), duration_ns)
+	return t
+}
+
+// run - Background countdown for one epoch; sleeps for duration_ns then
+// fires on `c`, unless this epoch was cancelled or superseded by reset()
+// in the meantime (checked and cleared atomically under `mu`)
+fn (mut t DelayTimer) run(epoch u64, duration_ns i64) {
+	sleep(time.Duration(duration_ns))
+
+	t.mu.lock()
+	should_fire := t.gen == epoch
+	if should_fire {
+		t.gen = 0
+	}
+	t.mu.unlock()
+
+	// Send outside the lock: c is unbuffered, so this may block until a
+	// receiver is ready, and must never hold `mu` while doing so.
+	if should_fire {
+		t.c <- now_ns()
+	}
+}
+
+// stop - Cancel a pending fire. Returns true if it stopped the timer before
+// it fired, false if the timer had already fired or was already stopped
+pub fn (mut t DelayTimer) stop() bool {
+	t.mu.lock()
+	was_active := t.gen != 0
+	t.gen = 0
+	t.mu.unlock()
+	return was_active
+}
+
+// reset - Stop any pending fire and restart the timer counting from now
+// with the new duration. Returns whether the timer was active before this
+// call
+pub fn (mut t DelayTimer) reset(duration_ns i64) bool {
+	t.mu.lock()
+	was_active := t.gen != 0
+	t.gen++
+	my_epoch := t.gen
+	t.mu.unlock()
+
+	spawn t.run(my_epoch, duration_ns)
+	return was_active
 }
 
 pub fn format_time[T](ns T) string {
